@@ -190,4 +190,37 @@ function animate(){
   renderer.render(scene,camera);
 }
 
+// hotkeys for hotbar and tabs
+window.addEventListener('keydown', onKeyDown);
+
+function onKeyDown(e) {
+  // Hotbar 1–5
+  if (e.code.startsWith('Digit')) {
+    const n = parseInt(e.code.slice(5), 10);
+    if (n >= 1 && n <= 5) {
+      DB.player.hotbarIndex = n - 1;
+      renderToolbar();
+    }
+  }
+
+  // Tabs
+  if (e.code === 'KeyI') selectTab('inventory');
+  if (e.code === 'KeyQ') selectTab('quests');
+
+  // (Optional) Crafting hotkey placeholder
+  if (e.code === 'KeyC') {
+    showCenterMessage('Crafting UI coming next ✨');
+  }
+}
+
+// simple tab switcher (mirrors clicking the tab buttons)
+function selectTab(name) {
+  document.querySelectorAll('.tabbtn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+  document.querySelectorAll('.tabpanel').forEach(p => {
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  });
+}
+
 window.addEventListener('DOMContentLoaded', init);
