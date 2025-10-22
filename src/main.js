@@ -1,5 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
-import { PointerLockControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/PointerLockControls.js';
+import * as THREE from 'three';
 import { makeRenderer, makeCamera, makeControls, resize, makeTerrain, groundHeightAt, addLighting, makeMinimap } from './engine.js';
 import { spawnTree, spawnRock, spawnNPC, spawnSlime, raycastInteract, biomeAt } from './world.js';
 import { DB, DB as Data, addXP, save, load } from './data.js';
@@ -8,9 +7,9 @@ import { renderUI, updateXPBar, addToInventory, progressQuest, renderToolbar, st
 console.log('main.js loaded'); // sanity log on deploy
 
 let scene, camera, renderer, controls, clock, minimap;
-let keys = {};
-let canJump = true;
-let enemies = [];
+let keys = {}; 
+let canJump = true; 
+let enemies = []; 
 let lastAttack = 0;
 
 window.GAME_DATA = Data;
@@ -35,7 +34,8 @@ function init() {
     const x = -280 + Math.random()*560;
     const z = -280 + Math.random()*560;
     const biome = biomeAt(x,z);
-    if (Math.random()<0.55) spawnTree(scene, x, z, id++, biome); else spawnRock(scene, x, z, id++, biome);
+    if (Math.random()<0.55) spawnTree(scene, x, z, id++, biome); 
+    else spawnRock(scene, x, z, id++, biome);
   }
 
   spawnNPC(scene, 0, 0, 'guide', 'Guide', [
@@ -60,7 +60,7 @@ function init() {
   minimap = makeMinimap(renderer, scene, controls.getObject());
 
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
   window.addEventListener('click', onClick);
   load(Data);
   renderUI();
@@ -68,7 +68,10 @@ function init() {
   animate();
 
   document.addEventListener('keydown', (e)=>{
-    if (e.code==='KeyC') { showCrafting(); setTimeout(()=> bindCraftingHandlers(Data.recipes, (id,q)=>addToInventory(id,q, Data.items), addXP), 0); }
+    if (e.code==='KeyC') { 
+      showCrafting(); 
+      setTimeout(()=> bindCraftingHandlers(Data.recipes, (id,q)=>addToInventory(id,q, Data.items), addXP), 0); 
+    }
   });
 }
 
@@ -78,7 +81,8 @@ function startGame() {
 }
 
 function updateStatsPanel(){
-  document.getElementById('stats').innerHTML = statsHTML();
+  const el = document.getElementById('stats');
+  if (el) el.innerHTML = statsHTML();
 }
 
 function onKeyDown(e) {
@@ -97,17 +101,24 @@ function onKeyDown(e) {
   if (e.code === 'KeyE') interact();
 }
 
-function onKeyUp(e) { keys[e.code] = false; }
+function onClick() {
+  if (!controls.isLocked) return controls.lock();
+  const target = raycastInteract(camera, scene);
+  if (!target) return;
+  const ud = target.userData||{};
+  if (ud.type==='enemy') return attack(target);
+  interact();
+}
 
 function attack(target) {
   const now = performance.now()/1000;
   if (now - lastAttack < 0.5) return;
   lastAttack = now;
   const weapon = DB.player.equipment.weapon || DB.player.inventory[DB.player.hotbarIndex];
-  const pow = weapon?.power || 1;
+  const pow = (weapon && weapon.power) ? weapon.power : 1;
   const ud = target.userData;
   ud.hp -= pow;
-  showCenterMessage(`Hit for ${pow}! (${Math.max(0,ud.hp)}/${ud.maxhp})`);
+  showCenterMessage('Hit for ' + pow + '! (' + Math.max(0,ud.hp) + '/' + ud.maxhp + ')');
   if (ud.hp<=0 && ud.alive) {
     ud.alive = false;
     target.visible = false;
@@ -116,8 +127,10 @@ function attack(target) {
     progressQuest('slay', 'slime', 1);
     (ud.loot||[]).forEach(l => addToInventory(l.id, l.qty, {}));
     setTimeout(()=>{
-      ud.hp = ud.maxhp; ud.alive = true; target.visible = true;
-      target.position.y = groundHeightAt(scene, target.position.x, target.position.z) + target.geometry.parameters.radius || 1;
+      ud.hp = ud.maxhp; 
+      ud.alive = true; 
+      target.visible = true;
+      target.position.y = groundHeightAt(scene, target.position.x, target.position.z) + 1;
     }, ud.respawn*1000);
   }
   save(DB);
@@ -156,8 +169,8 @@ function interact() {
   const isTree = ud.type==='tree';
   const required = isTree ? 'axe' : 'pick';
   const skill = isTree ? 'woodcutting' : 'mining';
-  if (!activeItem || !activeItem.id.includes(required)) {
-    showCenterMessage(`You need a ${isTree?'hatchet':'pickaxe'} equipped.`);
+  if (!activeItem || (activeItem.id||'').indexOf(required)===-1) {
+    showCenterMessage('You need a ' + (isTree?'hatchet':'pickaxe') + ' equipped.');
     return;
   }
   ud.resource.hp -= activeItem.power;
@@ -173,16 +186,6 @@ function interact() {
     showCenterMessage(isTree? 'Chop...' : 'Mine...');
   }
   save(DB);
-}
-
-function onClick(e) {
-  if (!controls.isLocked) return controls.lock();
-  const target = raycastInteract(camera, scene);
-  if (!target) return;
-  const ud = target.userData||{};
-  if (ud.type==='enemy') return attack(target);
-  // otherwise treat as interact
-  interact();
 }
 
 function physics(dt) {
@@ -217,7 +220,7 @@ function physics(dt) {
 
   // stamina regen
   const p = DB.player;
-  p.stamina = Math.min(100, p.stamina + ( (keys.KeyW||keys.KeyA||keys.KeyS||keys.KeyD) ? 4*dt : 8*dt));
+  p.stamina = Math.min(100, p.stamina + ((keys.KeyW||keys.KeyA||keys.KeyS||keys.KeyD) ? 4*dt : 8*dt));
 
   // enemy AI
   const playerPos = obj.position;
@@ -233,7 +236,6 @@ function physics(dt) {
       en.position.x += nx * ud.speed * dt;
       en.position.z += nz * ud.speed * dt;
       en.position.y = groundHeightAt(scene, en.position.x, en.position.z) + 0.8;
-      // damage player if close
       if (d < 1.6) {
         const now = performance.now()/1000;
         if (!ud.lastHit || now - ud.lastHit > 1.0) {
@@ -241,7 +243,7 @@ function physics(dt) {
           const dmg = Math.max(1, ud.dmg - (DB.player.equipment.head?.armor||0));
           DB.player.hp -= dmg;
           updateHealthBar();
-          showCenterMessage(`Slime hit you for ${dmg}! (${DB.player.hp}/${DB.player.maxhp})`);
+          showCenterMessage('Slime hit you for ' + dmg + '! (' + DB.player.hp + '/' + DB.player.maxhp + ')');
           if (DB.player.hp <= 0) {
             respawnPlayer();
           }
@@ -249,7 +251,7 @@ function physics(dt) {
       }
     } else {
       // idle bob
-      en.position.y = groundHeightAt(scene, en.position.x, en.position.z) + 0.8 + Math.sin(performance.now()/400 + ud.id.length)*0.05;
+      en.position.y = groundHeightAt(scene, en.position.x, en.position.z) + 0.8 + Math.sin(performance.now()/400 + (ud.id?ud.id.length:1))*0.05;
     }
   });
 }
@@ -270,4 +272,4 @@ function animate() {
   updateStatsPanel();
 }
 
-init();
+window.addEventListener('DOMContentLoaded', init);
