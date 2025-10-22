@@ -1,5 +1,26 @@
 import { DB, addXP, save, toast } from './data.js';
 
+/* ---------- UI bootstrap ---------- */
+export function initUI(){
+  // Tabs
+  document.querySelectorAll('.tabbtn').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+    };
+  });
+
+  // Reset save
+  const reset = ()=>{ localStorage.removeItem('rs-plus-save'); location.reload(); };
+  const btn = document.getElementById('resetBtn');
+  if (btn) btn.onclick = reset;
+  window.addEventListener('keydown', e=>{
+    if (e.shiftKey && e.code === 'KeyR') reset();
+  });
+}
+
 export function renderUI() {
   renderInventory(); renderSkills(); renderToolbar(); renderQuests(); renderEquip();
   document.getElementById('stats').innerHTML = statsHTML();
@@ -8,50 +29,113 @@ export function renderUI() {
 
 export function statsHTML(){
   const p = DB.player;
-  return 'Pos: ' + p.pos.x.toFixed(1) + ', ' + p.pos.y.toFixed(1) + ', ' + p.pos.z.toFixed(1) +
-         '<br/>HP: ' + p.hp + '/' + p.maxhp + ' | Stamina: ' + p.stamina.toFixed(0) + ' | Active slot: ' + (p.hotbarIndex+1);
+  return `HP: ${p.hp}/${p.maxhp} &nbsp;|&nbsp; Stamina: ${p.stamina.toFixed(0)} &nbsp;|&nbsp; Active slot: ${p.hotbarIndex+1}`;
 }
+
+/* ---------- Inventory (stacked) ---------- */
+function isStackable(it){ return it && (it.stack || (!it.slot && !it.power && !it.armor)); }
 
 export function renderInventory() {
   const inv = DB.player.inventory;
   const el = document.getElementById('inventory');
-  el.innerHTML = '<b>Inventory</b> (' + inv.length + ') <button id=\"openCraft\">Crafting</button><hr/>' + inv.map((it,i)=>{
-    const req = it.req ? '(' + Object.entries(it.req).map(([k,v])=>k + ' ' + v).join(', ') + ')' : '';
-    const eatBtn = it.slot==='food' ? '<button data-i=\"' + i + '\" data-act=\"eat\">Eat</button>' : '';
-    return '<div>' + (it.name || it.id) + ' ' + req +
-      ' <button data-i=\"' + i + '\" data-act=\"equip\">Equip</button>' +
-      ' <button data-i=\"' + i + '\" data-act=\"drop\">Drop</button> ' + eatBtn + '</div>';
-  }).join('') + '<hr/><b>Tips:</b> Craft basic gear, then explore. Combat grants combat XP.';
 
-  el.querySelector('#openCraft').onclick = ()=> showCrafting();
-  el.querySelectorAll('button[data-act=\"equip\"]').forEach(btn=>{ btn.onclick = ()=> equipItem(parseInt(btn.dataset.i)); });
-  el.querySelectorAll('button[data-act=\"drop\"]').forEach(btn=>{ btn.onclick = ()=> { inv.splice(parseInt(btn.dataset.i),1); renderUI(); save(); }; });
-  el.querySelectorAll('button[data-act=\"eat\"]').forEach(btn=>{ btn.onclick = ()=> { const i = parseInt(btn.dataset.i); eatFood(i); }; });
+  // Group into stacks for display
+  const stacks = [];
+  for (const it of inv){
+    const key = it.id;
+    const st = stacks.find(s=>s.id===key);
+    if (st) st.qty += (it.qty||1);
+    else stacks.push({ ...it, qty: (it.qty||1) });
+  }
+
+  el.innerHTML = stacks.map((it,i)=>{
+    const name = it.name || it.id;
+    const qty = it.qty>1 ? ` <small>×${it.qty}</small>` : '';
+    const equipBtn = it.slot ? `<button data-i="${i}" data-act="equip">Equip</button>` : '';
+    const eatBtn = it.slot==='food' ? `<button data-i="${i}" data-act="eat">Eat</button>` : '';
+    const dropBtns = isStackable(it)
+      ? `<button data-i="${i}" data-act="drop1">Drop 1</button><button data-i="${i}" data-act="dropall">Drop All</button>`
+      : `<button data-i="${i}" data-act="drop">Drop</button>`;
+    return `<div class="row"><div>${name}${qty}</div><div class="actions">${equipBtn}${eatBtn}${dropBtns}</div></div>`;
+  }).join('');
+
+  // Bind actions
+  el.querySelectorAll('button[data-act="equip"]').forEach(b=> b.onclick = ()=> equipStack(parseInt(b.dataset.i), stacks));
+  el.querySelectorAll('button[data-act="eat"]').forEach(b=> b.onclick = ()=> eatStack(parseInt(b.dataset.i), stacks));
+  el.querySelectorAll('button[data-act="drop"]').forEach(b=> b.onclick = ()=> dropExact(stacks[parseInt(b.dataset.i)], Infinity));
+  el.querySelectorAll('button[data-act="drop1"]').forEach(b=> b.onclick = ()=> dropExact(stacks[parseInt(b.dataset.i)], 1));
+  el.querySelectorAll('button[data-act="dropall"]').forEach(b=> b.onclick = ()=> dropExact(stacks[parseInt(b.dataset.i)], Infinity));
 }
 
-export function eatFood(i) {
-  const it = DB.player.inventory[i];
-  if (!it || it.slot!=='food') return;
-  DB.player.hp = Math.min(DB.player.maxhp, DB.player.hp + (it.heal||5));
-  DB.player.inventory.splice(i,1);
+function dropExact(stack, amount){
+  // Remove up to "amount" items matching the id
+  let need = amount;
+  for (let i=DB.player.inventory.length-1; i>=0 && need>0; i--){
+    const it = DB.player.inventory[i];
+    if (it.id===stack.id){
+      const take = Math.min(need, it.qty||1);
+      if ((it.qty||1) > take) { it.qty -= take; need -= take; }
+      else { DB.player.inventory.splice(i,1); need -= take; }
+    }
+  }
+  save(); renderInventory();
+}
+
+function eatStack(idx, stacks){
+  const st = stacks[idx]; if (!st || st.slot!=='food') return;
+  DB.player.hp = Math.min(DB.player.maxhp, DB.player.hp + (st.heal||5));
+  dropExact(st, 1);
   updateHealthBar();
   toast('Nom nom. Restored some HP.');
-  renderInventory(); save();
+}
+
+function equipStack(idx, stacks){
+  const it = stacks[idx]; if (!it) return;
+  if (it.req) for (const [skill,lvl] of Object.entries(it.req)) {
+    if ((DB.player.skills[skill]?.level ?? 1) < lvl) { toast(`Requires ${skill} ${lvl}`); return; }
+  }
+  if (it.slot==='weapon' || it.slot==='head' || it.slot==='body') {
+    DB.player.equipment[it.slot] = it;
+    toast(`Equipped ${it.name||it.id}`);
+  } else {
+    // Tool → move one to hotbar (front of inventory)
+    removeOneById(it.id);
+    DB.player.inventory.unshift({ ...it, qty:1 });
+    DB.player.hotbarIndex = 0;
+    toast(`Equipped ${it.name||it.id} to hotbar`);
+  }
+  renderToolbar(); renderInventory(); renderEquip(); save();
+}
+
+function removeOneById(id){
+  for (let i=DB.player.inventory.length-1; i>=0; i--){
+    const it = DB.player.inventory[i];
+    if (it.id===id){
+      if (it.qty && it.qty>1) it.qty -= 1;
+      else DB.player.inventory.splice(i,1);
+      return;
+    }
+  }
 }
 
 export function renderEquip() {
   const el = document.getElementById('equip');
   const eq = DB.player.equipment;
-  el.innerHTML = '<b>Equipment</b><hr/>' +
-    '<div>Weapon: ' + (eq.weapon?.name || '-') + '</div>' +
-    '<div>Head: ' + (eq.head?.name || '-') + '</div>' +
-    '<div>Body: ' + (eq.body?.name || '-') + '</div>';
+  el.innerHTML = `<b>Equipment</b><hr style="border-color:#26263a"/>
+    <div>Weapon: ${eq.weapon?.name || '-'}</div>
+    <div>Head: ${eq.head?.name || '-'}</div>
+    <div>Body: ${eq.body?.name || '-'}</div>`;
 }
 
 export function renderSkills() {
   const el = document.getElementById('skills');
-  el.innerHTML = '<b>Skills</b><hr/>' + Object.entries(DB.player.skills).map(([k,v])=>{
-    return '<div style=\"display:flex;justify-content:space-between;gap:8px\"><span>' + k + '</span><span>Lv ' + v.level + ' (' + v.xp + '/' + Math.max(1, v.level*25) + ')</span></div>';
+  el.innerHTML = Object.entries(DB.player.skills).map(([k,v])=>{
+    const pct = Math.min(100, (v.xp/Math.max(1, v.level*25))*100);
+    return `<div class="row"><div style="min-width:90px">${k}</div>
+      <div style="flex:1; background:#0b0d20; border:1px solid #1f2142; border-radius:6px; overflow:hidden; height:12px">
+        <div style="height:12px;width:${pct}%;background:linear-gradient(90deg,#6ee7b7,#22d3ee)"></div>
+      </div>
+      <div style="min-width:84px; text-align:right">Lv ${v.level} — ${v.xp}</div></div>`;
   }).join('');
 }
 
@@ -72,24 +156,13 @@ export function renderQuests() {
   const el = document.getElementById('questlog');
   const active = DB.player.quests.active;
   const completed = DB.player.quests.completed;
-  el.innerHTML = '<b>Quests</b><hr/>' + active.map(q=>{
+  el.innerHTML = active.map(q=>{
     const prog = q.goals.map(g=>{
-      const cur = (g.progress||0); const need = g.qty;
-      return '<div>' + g.kind + ' ' + g.item + (g.or?(' / ' + g.or):'') + ': ' + cur + '/' + need + '</div>';
+      const cur = (g.progress||0), need = g.qty;
+      return `<div>${g.kind} ${g.item}${g.or?(' / '+g.or):''}: <b>${cur}/${need}</b></div>`;
     }).join('');
-    return '<div><b>' + q.name + '</b><br/><small>' + q.desc + '</small>' + prog + '</div>';
-  }).join('<hr/>') + (completed.length? ('<hr/><b>Completed</b><br/>' + completed.map(q=>q.name).join(', ')) : '');
-}
-
-export function equipItem(i) {
-  const it = DB.player.inventory[i]; if (!it) return;
-  if (it.req) { for (const [skill,lvl] of Object.entries(it.req)) { if ((DB.player.skills[skill]?.level ?? 1) < lvl) { toast('Requires ' + skill + ' ' + lvl); return; } } }
-  if (it.slot==='weapon' || it.slot==='head' || it.slot==='body') {
-    DB.player.equipment[it.slot] = it; toast('Equipped ' + (it.name || it.id));
-  } else {
-    DB.player.inventory.splice(i,1); DB.player.inventory.unshift(it); DB.player.hotbarIndex = 0; toast('Equipped ' + (it.name || it.id) + ' to hotbar');
-  }
-  renderToolbar(); renderInventory(); renderEquip(); save();
+    return `<div class="row"><div><b>${q.name}</b><br/><small>${q.desc}</small></div><div>${prog}</div></div>`;
+  }).join('') + (completed.length? (`<hr style="border-color:#26263a"/><b>Completed:</b> ${completed.map(q=>q.name).join(', ')}`) : '');
 }
 
 export function updateXPBar(skill='combat') {
@@ -98,8 +171,17 @@ export function updateXPBar(skill='combat') {
   document.getElementById('xpBar').style.width = pct+'%';
 }
 
-export function addToInventory(id, qty=1, atlas) {
-  for (let i=0;i<qty;i++) DB.player.inventory.push(atlas[id] ? { id, ...(atlas[id]) } : { id });
+export function addToInventory(id, qty=1, atlas={}) {
+  const meta = atlas[id] || {};
+  // Try to find existing stack first
+  const stackable = meta.stack || (!meta.slot && !meta.power && !meta.armor);
+  if (stackable){
+    const found = DB.player.inventory.find(i=>i.id===id && (i.stack || (!i.slot && !i.power && !i.armor)));
+    if (found){ found.qty = (found.qty||1) + qty; }
+    else DB.player.inventory.push({ id, ...meta, qty });
+  } else {
+    for (let i=0;i<qty;i++) DB.player.inventory.push({ id, ...meta, qty:1 });
+  }
   save(); renderInventory();
 }
 
@@ -124,41 +206,6 @@ export function showCenterMessage(txt, ms=1200) {
   const el = document.getElementById('centerMsg');
   el.textContent = txt; el.style.opacity = 1;
   setTimeout(()=>{ el.style.opacity=0; }, ms);
-}
-
-export function showCrafting() {
-  const modal = document.getElementById('craftModal');
-  modal.style.display = 'block';
-  modal.innerHTML = '<b>Crafting</b> <button id=\"closeCraft\">X</button><hr/>' + renderCraftingList();
-  modal.querySelector('#closeCraft').onclick = ()=> { modal.style.display='none'; };
-}
-
-export function renderCraftingList() {
-  const recipes = window.GAME_DATA.recipes;
-  const inv = DB.player.inventory;
-  return recipes.map((r, idx)=>{
-    const can = r.in.every(req => inv.filter(i=>i.id===req.id).length >= req.qty);
-    const reqStr = r.in.map(req => req.id + '×' + req.qty).join(', ');
-    return '<div style=\"margin-bottom:6px\"><b>' + r.name + '</b> — <small>' + reqStr + '</small> ' +
-      '<button data-r=\"' + idx + '\" ' + (can?'':'disabled') + '>Craft</button></div>';
-  }).join('');
-}
-
-export function bindCraftingHandlers(recipes, addItemCb, addXPCb) {
-  const modal = document.getElementById('craftModal');
-  modal.querySelectorAll('button[data-r]').forEach(btn=>{
-    btn.onclick = ()=> {
-      const r = recipes[parseInt(btn.dataset.r)]; const inv = DB.player.inventory;
-      for (const req of r.in) {
-        let need = req.qty;
-        for (let i=inv.length-1; i>=0 && need>0; i--) { if (inv[i].id===req.id) { inv.splice(i,1); need--; } }
-      }
-      for (let i=0;i<r.out.qty;i++) addItemCb(r.out.id, 1);
-      addXPCb(DB.player, r.skill, r.xp);
-      modal.innerHTML = '<b>Crafting</b> <button id=\"closeCraft\">X</button><hr/>' + renderCraftingList();
-      modal.querySelector('#closeCraft').onclick = ()=> { modal.style.display='none'; };
-    };
-  });
 }
 
 export function updateHealthBar(){
