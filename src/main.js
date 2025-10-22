@@ -1,275 +1,182 @@
 import * as THREE from 'three';
-import { makeRenderer, makeCamera, makeControls, resize, makeTerrain, groundHeightAt, addLighting, makeMinimap } from './engine.js';
-import { spawnTree, spawnRock, spawnNPC, spawnSlime, raycastInteract, biomeAt } from './world.js';
+import { makeRenderer, makeTerrain, addLighting, groundHeightAt, resize } from './engine.js';
+import { spawnTree, spawnRock, spawnNPC, spawnSlime, biomeAt, raycastInteract } from './world.js';
 import { DB, DB as Data, addXP, save, load } from './data.js';
-import { renderUI, updateXPBar, addToInventory, progressQuest, renderToolbar, statsHTML, showCenterMessage, showCrafting, bindCraftingHandlers, updateHealthBar } from './ui.js';
+import { renderUI, updateXPBar, addToInventory, progressQuest,
+         renderToolbar, showCenterMessage, updateHealthBar } from './ui.js';
 
-console.log('main.js loaded'); // sanity log on deploy
+console.log('main.js loaded (3rd-person)');
 
-let scene, camera, renderer, controls, clock, minimap;
-let keys = {}; 
-let canJump = true; 
-let enemies = []; 
-let lastAttack = 0;
-
-window.GAME_DATA = Data;
+let scene, camera, renderer, clock;
+let player, moveTarget = null, moveSpeed = 8;
+let raycaster, mouse = new THREE.Vector2();
+let enemies = [];
 
 function init() {
+  // --- basics ---
   renderer = makeRenderer();
   document.body.appendChild(renderer.domElement);
-  camera = makeCamera();
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87ceeb);
-  controls = makeControls(camera, renderer.domElement);
-  document.getElementById('startBtn').onclick = startGame;
-  resize(renderer, camera);
   clock = new THREE.Clock();
 
   const terrain = makeTerrain(640, 3);
   scene.add(terrain);
   addLighting(scene);
 
-  let id = 0;
-  for (let i=0;i<200;i++) {
-    const x = -280 + Math.random()*560;
-    const z = -280 + Math.random()*560;
-    const biome = biomeAt(x,z);
-    if (Math.random()<0.55) spawnTree(scene, x, z, id++, biome); 
-    else spawnRock(scene, x, z, id++, biome);
-  }
+  // --- player ---
+  const geom = new THREE.CapsuleGeometry(0.6, 1.0, 8, 12);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2563eb });
+  player = new THREE.Mesh(geom, mat);
+  player.castShadow = true;
+  player.position.set(0, groundHeightAt(scene,0,0)+1, 0);
+  scene.add(player);
 
-  spawnNPC(scene, 0, 0, 'guide', 'Guide', [
-    'Welcome to RuneLite-ish PLUS!',
-    'Gather, craft, and try fighting slimes.',
-    'Stronger gear needs higher skills.'
+  // --- camera ---
+  camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.1, 2000);
+  camera.position.set(0, 6, 10);
+  resize(renderer, camera);
+
+  // --- world objects ---
+  let id=0;
+  for (let i=0;i<200;i++){
+    const x=-280+Math.random()*560;
+    const z=-280+Math.random()*560;
+    const biome=biomeAt(x,z);
+    if(Math.random()<0.55) spawnTree(scene,x,z,id++,biome);
+    else spawnRock(scene,x,z,id++,biome);
+  }
+  spawnNPC(scene, 0,0,'guide','Guide',[
+    'Welcome adventurer!',
+    'Click to move, click trees or rocks to interact.'
   ]);
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(5,5, 0.6, 20),
-    new THREE.MeshStandardMaterial({ color: 0x444444, metalness:0.2, roughness:0.8 })
-  );
-  hub.position.set(0, groundHeightAt(scene,0,0)+0.3, 0);
-  hub.receiveShadow = true;
-  scene.add(hub);
-
-  for (let i=0;i<12;i++) {
-    const x = -120 + Math.random()*240;
-    const z = -120 + Math.random()*240;
-    enemies.push(spawnSlime(scene, x, z, 'slime-'+i, 1+Math.floor(Math.random()*3)));
+  for(let i=0;i<8;i++){
+    const x=-120+Math.random()*240;
+    const z=-120+Math.random()*240;
+    enemies.push(spawnSlime(scene,x,z,'slime'+i,1+Math.floor(Math.random()*2)));
   }
 
-  minimap = makeMinimap(renderer, scene, controls.getObject());
+  // --- input ---
+  raycaster = new THREE.Raycaster();
+  window.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('resize', ()=>resize(renderer,camera));
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
-  window.addEventListener('click', onClick);
   load(Data);
   renderUI();
-  updateStatsPanel();
   animate();
-
-  document.addEventListener('keydown', (e)=>{
-    if (e.code==='KeyC') { 
-      showCrafting(); 
-      setTimeout(()=> bindCraftingHandlers(Data.recipes, (id,q)=>addToInventory(id,q, Data.items), addXP), 0); 
-    }
-  });
 }
 
-function startGame() {
-  document.getElementById('title').style.display = 'none';
-  controls.lock();
-}
+function onPointerDown(e){
+  e.preventDefault();
+  mouse.x = ( e.clientX / window.innerWidth ) * 2 - 1;
+  mouse.y = - ( e.clientY / window.innerHeight ) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
 
-function updateStatsPanel(){
-  const el = document.getElementById('stats');
-  if (el) el.innerHTML = statsHTML();
-}
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  if (!intersects.length) return;
 
-function onKeyDown(e) {
-  keys[e.code] = true;
-  if (e.code === 'KeyI') renderUI();
-  if (e.code === 'Digit1') { DB.player.hotbarIndex = 0; renderToolbar(); }
-  if (e.code === 'Digit2') { DB.player.hotbarIndex = 1; renderToolbar(); }
-  if (e.code === 'Digit3') { DB.player.hotbarIndex = 2; renderToolbar(); }
-  if (e.code === 'Digit4') { DB.player.hotbarIndex = 3; renderToolbar(); }
-  if (e.code === 'Digit5') { DB.player.hotbarIndex = 4; renderToolbar(); }
-  if (e.code === 'KeyQ') { document.getElementById('questlog').classList.toggle('panel'); }
-  if (e.code === 'Space' && canJump) {
-    controls.getObject().velocityY = 6;
-    canJump = false;
+  // find first visible mesh hit that has userData or terrain
+  let hit = intersects.find(i => i.object.visible);
+  if (!hit) return;
+
+  const obj = hit.object;
+  const ud = obj.userData || {};
+  if (ud.type==='tree' || ud.type==='rock' || ud.type==='npc' || ud.type==='enemy'){
+    moveTarget = { point: hit.point, target: obj }; // move then interact
+  } else {
+    moveTarget = { point: hit.point, target: null };
   }
-  if (e.code === 'KeyE') interact();
 }
 
-function onClick() {
-  if (!controls.isLocked) return controls.lock();
-  const target = raycastInteract(camera, scene);
-  if (!target) return;
-  const ud = target.userData||{};
-  if (ud.type==='enemy') return attack(target);
-  interact();
-}
+function movePlayer(dt){
+  if (!moveTarget) return;
+  const targetPos = moveTarget.point.clone();
+  const p = player.position;
+  const dx = targetPos.x - p.x;
+  const dz = targetPos.z - p.z;
+  const dist = Math.hypot(dx, dz);
 
-function attack(target) {
-  const now = performance.now()/1000;
-  if (now - lastAttack < 0.5) return;
-  lastAttack = now;
-  const weapon = DB.player.equipment.weapon || DB.player.inventory[DB.player.hotbarIndex];
-  const pow = (weapon && weapon.power) ? weapon.power : 1;
-  const ud = target.userData;
-  ud.hp -= pow;
-  showCenterMessage('Hit for ' + pow + '! (' + Math.max(0,ud.hp) + '/' + ud.maxhp + ')');
-  if (ud.hp<=0 && ud.alive) {
-    ud.alive = false;
-    target.visible = false;
-    addXP(DB.player, 'combat', 8);
-    updateXPBar('combat');
-    progressQuest('slay', 'slime', 1);
-    (ud.loot||[]).forEach(l => addToInventory(l.id, l.qty, {}));
-    setTimeout(()=>{
-      ud.hp = ud.maxhp; 
-      ud.alive = true; 
-      target.visible = true;
-      target.position.y = groundHeightAt(scene, target.position.x, target.position.z) + 1;
-    }, ud.respawn*1000);
+  if (dist < 0.8) {
+    // reached target
+    if (moveTarget.target) interact(moveTarget.target);
+    moveTarget = null;
+    return;
   }
-  save(DB);
+
+  const step = Math.min(dist, moveSpeed * dt);
+  p.x += (dx/dist) * step;
+  p.z += (dz/dist) * step;
+  p.y = groundHeightAt(scene, p.x, p.z) + 1;
+  player.lookAt(targetPos.x, p.y, targetPos.z);
 }
 
-function interact() {
-  const target = raycastInteract(camera, scene);
-  if (!target) return;
-  const ud = target.userData||{};
-  if (ud.type === 'npc') {
+function updateCamera(){
+  // smooth follow from behind
+  const desired = new THREE.Vector3(player.position.x, player.position.y+4, player.position.z+8);
+  camera.position.lerp(desired, 0.1);
+  camera.lookAt(player.position.x, player.position.y+1, player.position.z);
+}
+
+function interact(obj){
+  const ud = obj.userData||{};
+  if(ud.type==='npc'){
+    showCenterMessage('Talking to ' + (ud.name||'NPC'));
+    // give first quest if not yet taken
     if (!DB.player.quests.active.find(q=>q.id==='first-steps') && !DB.player.quests.completed.find(q=>q.id==='first-steps')) {
       DB.player.quests.active.push({ ...Data.quests[0], goals: Data.quests[0].goals.map(g=>({...g})) });
       showCenterMessage('New Quest: First Steps');
-    } else if (!DB.player.quests.active.find(q=>q.id==='apprentice-smith') && DB.player.quests.completed.find(q=>q.id==='first-steps')) {
-      DB.player.quests.active.push({ ...Data.quests[1], goals: Data.quests[1].goals.map(g=>({...g})) });
-      showCenterMessage('New Quest: Apprentice Smith');
-    } else if (!DB.player.quests.active.find(q=>q.id==='slime-buster')) {
-      DB.player.quests.active.push({ ...Data.quests[2], goals: Data.quests[2].goals.map(g=>({...g})) });
-      showCenterMessage('New Quest: Slime Buster');
-    } else {
-      showCenterMessage('Good luck, adventurer!');
+      save(DB);
     }
-    save(DB);
     return;
   }
-  if (ud.type==='enemy') {
-    attack(target);
-    return;
-  }
-  if (!ud.resource) return;
-  const now = performance.now()/1000;
-  if (ud.resource.last && now - ud.resource.last < 1.0) return;
-  ud.resource.last = now;
 
+  if(ud.type==='enemy'){
+    showCenterMessage('Attacking slime!');
+    attack(obj);
+    return;
+  }
+
+  if(!ud.resource) return;
   const activeItem = DB.player.inventory[DB.player.hotbarIndex];
   const isTree = ud.type==='tree';
-  const required = isTree ? 'axe' : 'pick';
-  const skill = isTree ? 'woodcutting' : 'mining';
-  if (!activeItem || (activeItem.id||'').indexOf(required)===-1) {
-    showCenterMessage('You need a ' + (isTree?'hatchet':'pickaxe') + ' equipped.');
+  const required = isTree?'axe':'pick';
+  const skill = isTree?'woodcutting':'mining';
+  if (!activeItem || !(activeItem.id||'').includes(required)) {
+    showCenterMessage('Need a ' + (isTree?'hatchet':'pickaxe') + ' equipped.');
     return;
   }
   ud.resource.hp -= activeItem.power;
-  if (ud.resource.hp <= 0) {
-    const drop = ud.resource.kind;
-    addToInventory(drop, 1, Data.items);
-    progressQuest('gather', drop, 1);
-    addXP(DB.player, skill, 5);
+  if (ud.resource.hp<=0){
+    addToInventory(ud.resource.kind,1,Data.items);
+    progressQuest('gather', ud.resource.kind,1);
+    addXP(DB.player, skill,5);
     updateXPBar(skill);
-    target.visible = false;
-    setTimeout(()=>{ ud.resource.hp = isTree?3:4; target.visible = true; }, ud.resource.respawn*1000);
+    ud.resource.hp = isTree?3:4;
+    showCenterMessage('Collected ' + ud.resource.kind);
   } else {
-    showCenterMessage(isTree? 'Chop...' : 'Mine...');
+    showCenterMessage(isTree?'Chop...':'Mine...');
   }
   save(DB);
 }
 
-function physics(dt) {
-  const speed = (keys.ShiftLeft||keys.ShiftRight) ? 10 : 6;
-  const dir = new THREE.Vector3();
-  const vel = new THREE.Vector3();
-
-  const fw = Number(keys.KeyW) - Number(keys.KeyS);
-  const rt = Number(keys.KeyD) - Number(keys.KeyA);
-  dir.set(rt, 0, fw).normalize();
-  if (fw||rt) {
-    const vec = new THREE.Vector3();
-    camera.getWorldDirection(vec);
-    const angle = Math.atan2(vec.x, vec.z);
-    vel.x = Math.sin(angle) * dir.z + Math.sin(angle+Math.PI/2)*dir.x;
-    vel.z = Math.cos(angle) * dir.z + Math.cos(angle+Math.PI/2)*dir.x;
-    controls.getObject().position.x += vel.x * speed * dt;
-    controls.getObject().position.z += vel.z * speed * dt;
+function attack(enemy){
+  const ud = enemy.userData;
+  ud.hp -= 3;
+  if (ud.hp<=0 && ud.alive){
+    ud.alive=false; enemy.visible=false;
+    addXP(DB.player,'combat',8); updateXPBar('combat');
+    progressQuest('slay','slime',1);
+    showCenterMessage('Slime defeated!');
+    setTimeout(()=>{ ud.hp=ud.maxhp; ud.alive=true; enemy.visible=true; }, ud.respawn*1000);
   }
-
-  // gravity
-  const obj = controls.getObject();
-  obj.velocityY = (obj.velocityY || 0) - 20*dt;
-  obj.position.y += obj.velocityY * dt;
-
-  const ground = groundHeightAt(scene, obj.position.x, obj.position.z) + 1.7;
-  if (obj.position.y < ground) {
-    obj.position.y = ground;
-    obj.velocityY = 0;
-    canJump = true;
-  }
-
-  // stamina regen
-  const p = DB.player;
-  p.stamina = Math.min(100, p.stamina + ((keys.KeyW||keys.KeyA||keys.KeyS||keys.KeyD) ? 4*dt : 8*dt));
-
-  // enemy AI
-  const playerPos = obj.position;
-  enemies.forEach(en => {
-    const ud = en.userData;
-    if (!ud.alive) return;
-    const dx = playerPos.x - en.position.x;
-    const dz = playerPos.z - en.position.z;
-    const d = Math.hypot(dx, dz);
-    if (d < ud.aggro) {
-      const nx = dx / (d||1);
-      const nz = dz / (d||1);
-      en.position.x += nx * ud.speed * dt;
-      en.position.z += nz * ud.speed * dt;
-      en.position.y = groundHeightAt(scene, en.position.x, en.position.z) + 0.8;
-      if (d < 1.6) {
-        const now = performance.now()/1000;
-        if (!ud.lastHit || now - ud.lastHit > 1.0) {
-          ud.lastHit = now;
-          const dmg = Math.max(1, ud.dmg - (DB.player.equipment.head?.armor||0));
-          DB.player.hp -= dmg;
-          updateHealthBar();
-          showCenterMessage('Slime hit you for ' + dmg + '! (' + DB.player.hp + '/' + DB.player.maxhp + ')');
-          if (DB.player.hp <= 0) {
-            respawnPlayer();
-          }
-        }
-      }
-    } else {
-      // idle bob
-      en.position.y = groundHeightAt(scene, en.position.x, en.position.z) + 0.8 + Math.sin(performance.now()/400 + (ud.id?ud.id.length:1))*0.05;
-    }
-  });
-}
-
-function respawnPlayer(){
-  DB.player.hp = DB.player.maxhp;
-  controls.getObject().position.set(0, groundHeightAt(scene,0,0)+2, 0);
-  showCenterMessage('You died. Respawning at hub.');
   save(DB);
 }
 
-function animate() {
+function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
-  physics(dt);
-  minimap.render();
-  renderer.render(scene, camera);
-  updateStatsPanel();
+  movePlayer(dt);
+  updateCamera();
+  renderer.render(scene,camera);
 }
-
 window.addEventListener('DOMContentLoaded', init);
