@@ -74,7 +74,11 @@ export function addXP(player, skill, amount) {
     s.xp -= xpToNext(s.level);
     s.level++;
     const el = document.getElementById('notif');
-    if (el) { el.textContent = 'Level up! ' + skill + ' is now ' + s.level + '.'; el.style.display='block'; setTimeout(()=>{el.style.display='none';},1500); }
+    if (el) { 
+      el.textContent = 'Level up! ' + skill + ' is now ' + s.level + '.'; 
+      el.style.display='block'; 
+      setTimeout(()=>{el.style.display='none';},1500); 
+    }
   }
 }
 
