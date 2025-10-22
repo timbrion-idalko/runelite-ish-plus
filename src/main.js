@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeRenderer, makeTerrain, addLighting, groundHeightAt, resize } from './engine.js';
+renderer.toneMappingExposure = 1.2;
 import { spawnTree, spawnRock, spawnNPC, spawnSlime, biomeAt, raycastInteract } from './world.js';
 import { DB, DB as Data, addXP, save, load } from './data.js';
 import { renderUI, updateXPBar, addToInventory, progressQuest,
@@ -22,7 +23,11 @@ function init() {
 
   const terrain = makeTerrain(640, 3);
   scene.add(terrain);
+  import { addLighting, makeSky } from './engine.js';
+  ...
   addLighting(scene);
+  makeSky(scene);
+
 
   // --- player ---
   const geom = new THREE.CapsuleGeometry(0.6, 1.0, 8, 12);
