@@ -1,17 +1,22 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
+// ======= Stylized Fantasy Engine =======
+
 export function makeRenderer() {
   const renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.outputEncoding = THREE.sRGBEncoding;
   return renderer;
 }
 
 export function makeCamera() {
-  const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 2000);
-  camera.position.set(0, 2, 10);
+  const camera = new THREE.PerspectiveCamera(65, window.innerWidth/window.innerHeight, 0.1, 2000);
+  camera.position.set(0, 5, 10);
   return camera;
 }
 
@@ -23,17 +28,13 @@ export function makeControls(camera, dom) {
 
 export function resize(renderer, camera) {
   window.addEventListener('resize',()=>{
-    camera.aspect = innerWidth/innerHeight;
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
 }
 
-export function simpleHeights(x, z) {
-  const f = (n)=>Math.sin(n*0.09)+Math.sin(n*0.021);
-  return (f(x)+f(z)+Math.sin((x+z)*0.035))*1.2;
-}
-
+// ====== Terrain ======
 export function makeTerrain(size=640, step=3) {
   const geo = new THREE.PlaneGeometry(size, size, size/step, size/step);
   geo.rotateX(-Math.PI/2);
@@ -41,11 +42,29 @@ export function makeTerrain(size=640, step=3) {
   for (let i=0;i<pos.count;i++){
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    pos.setY(i, simpleHeights(x, z));
+    const h = Math.sin(x*0.02)*2 + Math.cos(z*0.015)*3 + Math.sin((x+z)*0.01)*2;
+    pos.setY(i, h);
   }
   pos.needsUpdate = true;
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x445b3a, roughness: 0.95 });
+
+  // Textured material
+  const texLoader = new THREE.TextureLoader();
+  const texGrass = texLoader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/terrain/grasslight-big.jpg');
+  const texRock = texLoader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r160/examples/textures/terrain/grasslight-big-nm.jpg');
+  texGrass.wrapS = texGrass.wrapT = THREE.RepeatWrapping;
+  texRock.wrapS = texRock.wrapT = THREE.RepeatWrapping;
+  texGrass.repeat.set(64,64);
+  texRock.repeat.set(64,64);
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: texGrass,
+    normalMap: texRock,
+    roughness: 0.8,
+    metalness: 0.1
+  });
+
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.name = 'terrain';
@@ -60,52 +79,55 @@ export function groundHeightAt(scene, x, z) {
   return hits[0]?.point.y ?? 0;
 }
 
+// ===== Lighting + Atmosphere =====
 export function addLighting(scene){
-  const hemi = new THREE.HemisphereLight(0xcbd5e1, 0x0a0a0a, 0.75);
+  const hemi = new THREE.HemisphereLight(0xfff6e5, 0x202040, 1.2);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.05);
-  sun.position.set(100, 120, 60);
+
+  const sun = new THREE.DirectionalLight(0xfff5cc, 1.3);
+  sun.position.set(200, 300, 100);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048,2048);
   scene.add(sun);
-  return { hemi, sun };
+
+  const ambient = new THREE.AmbientLight(0x404040, 0.6);
+  scene.add(ambient);
+
+  // soft fog for dreamy look
+  scene.fog = new THREE.FogExp2(0x9ac4f8, 0.0022);
+
+  return { hemi, sun, ambient };
 }
 
-export function makeMinimap(renderer, scene, player) {
-  const mapCam = new THREE.OrthographicCamera(-90,90,90,-90, 0.1, 400);
-  mapCam.position.set(0,200,0);
-  mapCam.lookAt(0,0,0);
-  const rt = new THREE.WebGLRenderTarget(256,256);
-  const el = document.getElementById('minimap');
-  const cvs = document.createElement('canvas');
-  cvs.width = 160; cvs.height = 160; el.appendChild(cvs);
-  const ctx = cvs.getContext('2d');
-
-  function render() {
-    const p = player.position;
-    mapCam.position.set(p.x, 200, p.z);
-    mapCam.lookAt(p.x, 0, p.z);
-
-    renderer.setRenderTarget(rt);
-    renderer.render(scene, mapCam);
-    renderer.setRenderTarget(null);
-
-    const pixels = new Uint8Array(256*256*4);
-    renderer.readRenderTargetPixels(rt, 0,0,256,256, pixels);
-
-    const imgData = new ImageData(new Uint8ClampedArray(pixels), 256, 256);
-    const off = document.createElement('canvas');
-    off.width=256; off.height=256;
-    const octx = off.getContext('2d');
-    octx.putImageData(imgData,0,0);
-
-    ctx.clearRect(0,0,160,160);
-    ctx.save();
-    ctx.beginPath(); ctx.arc(80,80,80,0,Math.PI*2); ctx.clip();
-    ctx.drawImage(off, 0,0,256,256, 0,0,160,160);
-    ctx.restore();
-    ctx.fillStyle = '#00ffff';
-    ctx.beginPath(); ctx.arc(80,80,4,0,Math.PI*2); ctx.fill();
-  }
-  return { render };
+export function makeSky(scene) {
+  const skyGeo = new THREE.SphereGeometry(1000, 32, 32);
+  const skyMat = new THREE.ShaderMaterial({
+    uniforms: {
+      topColor: { value: new THREE.Color(0x91c9f7) },
+      bottomColor: { value: new THREE.Color(0xe0b8ff) },
+      offset: { value: 0 },
+      exponent: { value: 0.6 }
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4( position, 1.0 );
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      }`,
+    fragmentShader: `
+      uniform vec3 topColor;
+      uniform vec3 bottomColor;
+      uniform float offset;
+      uniform float exponent;
+      varying vec3 vWorldPosition;
+      void main() {
+        float h = normalize( vWorldPosition + offset ).y;
+        gl_FragColor = vec4( mix( bottomColor, topColor, max( pow( max(h, 0.0), exponent ), 0.0 ) ), 1.0 );
+      }`,
+    side: THREE.BackSide,
+    depthWrite: false
+  });
+  const sky = new THREE.Mesh(skyGeo, skyMat);
+  scene.add(sky);
 }
