@@ -1,5 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
-import { PointerLockControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/PointerLockControls.js';
+import * as THREE from 'three';
 import { groundHeightAt } from './engine.js';
 
 export function biomeAt(x, z) {
@@ -81,7 +80,10 @@ export function raycastInteract(camera, scene) {
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(0,0), camera);
   const pickables = [];
-  scene.traverse(o => { if (o.userData && (o.userData.type==='tree' || o.userData.type==='rock' || o.userData.type==='npc' || o.userData.type==='enemy')) pickables.push(o); });
+  scene.traverse(o => { 
+    if (o.userData && (o.userData.type==='tree' || o.userData.type==='rock' || o.userData.type==='npc' || o.userData.type==='enemy')) 
+      pickables.push(o); 
+  });
   const hits = ray.intersectObjects(pickables, false);
   return hits[0]?.object?.parent ?? hits[0]?.object ?? null;
 }
