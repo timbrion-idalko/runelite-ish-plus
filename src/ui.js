@@ -15,18 +15,18 @@ export function statsHTML(){
 export function renderInventory() {
   const inv = DB.player.inventory;
   const el = document.getElementById('inventory');
-  el.innerHTML = '<b>Inventory</b> (' + inv.length + ') <button id="openCraft">Crafting</button><hr/>' + inv.map((it,i)=>{
+  el.innerHTML = '<b>Inventory</b> (' + inv.length + ') <button id=\"openCraft\">Crafting</button><hr/>' + inv.map((it,i)=>{
     const req = it.req ? '(' + Object.entries(it.req).map(([k,v])=>k + ' ' + v).join(', ') + ')' : '';
-    const eatBtn = it.slot==='food' ? '<button data-i="' + i + '" data-act="eat">Eat</button>' : '';
+    const eatBtn = it.slot==='food' ? '<button data-i=\"' + i + '\" data-act=\"eat\">Eat</button>' : '';
     return '<div>' + (it.name || it.id) + ' ' + req +
-      ' <button data-i="' + i + '" data-act="equip">Equip</button>' +
-      ' <button data-i="' + i + '" data-act="drop">Drop</button> ' + eatBtn + '</div>';
+      ' <button data-i=\"' + i + '\" data-act=\"equip\">Equip</button>' +
+      ' <button data-i=\"' + i + '\" data-act=\"drop\">Drop</button> ' + eatBtn + '</div>';
   }).join('') + '<hr/><b>Tips:</b> Craft basic gear, then explore. Combat grants combat XP.';
 
   el.querySelector('#openCraft').onclick = ()=> showCrafting();
-  el.querySelectorAll('button[data-act="equip"]').forEach(btn=>{ btn.onclick = ()=> equipItem(parseInt(btn.dataset.i)); });
-  el.querySelectorAll('button[data-act="drop"]').forEach(btn=>{ btn.onclick = ()=> { inv.splice(parseInt(btn.dataset.i),1); renderUI(); save(); }; });
-  el.querySelectorAll('button[data-act="eat"]').forEach(btn=>{ btn.onclick = ()=> { const i = parseInt(btn.dataset.i); eatFood(i); }; });
+  el.querySelectorAll('button[data-act=\"equip\"]').forEach(btn=>{ btn.onclick = ()=> equipItem(parseInt(btn.dataset.i)); });
+  el.querySelectorAll('button[data-act=\"drop\"]').forEach(btn=>{ btn.onclick = ()=> { inv.splice(parseInt(btn.dataset.i),1); renderUI(); save(); }; });
+  el.querySelectorAll('button[data-act=\"eat\"]').forEach(btn=>{ btn.onclick = ()=> { const i = parseInt(btn.dataset.i); eatFood(i); }; });
 }
 
 export function eatFood(i) {
@@ -51,7 +51,7 @@ export function renderEquip() {
 export function renderSkills() {
   const el = document.getElementById('skills');
   el.innerHTML = '<b>Skills</b><hr/>' + Object.entries(DB.player.skills).map(([k,v])=>{
-    return '<div style="display:flex;justify-content:space-between;gap:8px"><span>' + k + '</span><span>Lv ' + v.level + ' (' + v.xp + '/' + Math.max(1, v.level*25) + ')</span></div>';
+    return '<div style=\"display:flex;justify-content:space-between;gap:8px\"><span>' + k + '</span><span>Lv ' + v.level + ' (' + v.xp + '/' + Math.max(1, v.level*25) + ')</span></div>';
   }).join('');
 }
 
@@ -129,7 +129,7 @@ export function showCenterMessage(txt, ms=1200) {
 export function showCrafting() {
   const modal = document.getElementById('craftModal');
   modal.style.display = 'block';
-  modal.innerHTML = '<b>Crafting</b> <button id="closeCraft">X</button><hr/>' + renderCraftingList();
+  modal.innerHTML = '<b>Crafting</b> <button id=\"closeCraft\">X</button><hr/>' + renderCraftingList();
   modal.querySelector('#closeCraft').onclick = ()=> { modal.style.display='none'; };
 }
 
@@ -139,8 +139,8 @@ export function renderCraftingList() {
   return recipes.map((r, idx)=>{
     const can = r.in.every(req => inv.filter(i=>i.id===req.id).length >= req.qty);
     const reqStr = r.in.map(req => req.id + '×' + req.qty).join(', ');
-    return '<div style="margin-bottom:6px"><b>' + r.name + '</b> — <small>' + reqStr + '</small> ' +
-      '<button data-r="' + idx + '" ' + (can?'':'disabled') + '>Craft</button></div>';
+    return '<div style=\"margin-bottom:6px\"><b>' + r.name + '</b> — <small>' + reqStr + '</small> ' +
+      '<button data-r=\"' + idx + '\" ' + (can?'':'disabled') + '>Craft</button></div>';
   }).join('');
 }
 
@@ -155,7 +155,7 @@ export function bindCraftingHandlers(recipes, addItemCb, addXPCb) {
       }
       for (let i=0;i<r.out.qty;i++) addItemCb(r.out.id, 1);
       addXPCb(DB.player, r.skill, r.xp);
-      modal.innerHTML = '<b>Crafting</b> <button id="closeCraft">X</button><hr/>' + renderCraftingList();
+      modal.innerHTML = '<b>Crafting</b> <button id=\"closeCraft\">X</button><hr/>' + renderCraftingList();
       modal.querySelector('#closeCraft').onclick = ()=> { modal.style.display='none'; };
     };
   });
