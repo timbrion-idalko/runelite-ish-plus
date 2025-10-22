@@ -1,4 +1,5 @@
 import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+import { PointerLockControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/PointerLockControls.js';
 import { makeRenderer, makeCamera, makeControls, resize, makeTerrain, groundHeightAt, addLighting, makeMinimap } from './engine.js';
 import { spawnTree, spawnRock, spawnNPC, spawnSlime, raycastInteract, biomeAt } from './world.js';
 import { DB, DB as Data, addXP, save, load } from './data.js';
