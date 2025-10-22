@@ -60,6 +60,11 @@ function init() {
   raycaster = new THREE.Raycaster();
   window.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('resize', ()=>resize(renderer,camera));
+         
+  // --- start screen button ---
+  document.getElementById('startBtn').onclick = () => {
+  document.getElementById('title').style.display = 'none';
+};
 
   load(Data);
   renderUI();
